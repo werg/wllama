@@ -276,6 +276,7 @@ struct wllama_context
     int32_t n_tokens = 0;
   };
   std::unordered_map<int, decision_request> decision_reqs; // keyed by req_id
+  std::unordered_map<int, server_score_batch> score_reqs;    // keyed by req_id
 
   struct console
   {
@@ -554,6 +555,8 @@ struct wllama_context
     }
     if (req.lora_init_without_apply.not_null())
       params.lora_init_without_apply = req.lora_init_without_apply.value;
+    if (req.native_state_paths.not_null())
+      params.native_states = req.native_state_paths.arr;
 
     // speculative decoding
     if (req.spec_draft_model.not_null())
@@ -819,6 +822,33 @@ struct wllama_context
     return res;
   }
 
+  glue_msg_score_res action_score(const char *req_raw)
+  {
+    PARSE_REQ(glue_msg_score_req);
+    glue_msg_score_res res;
+
+    json body = json::parse(req.data_json.value);
+    auto rd = std::make_unique<server_response_reader>(ctx_server.get_response_reader());
+    server_score_batch batch;
+    auto tasks = server_score_tasks(*meta, vocab, params, body, *rd, batch);
+    size_t n_results = 0;
+    for (const auto &item : batch.results)
+    {
+      n_results += item.size();
+    }
+    batch.log_probs.resize(n_results);
+    batch.n_scored.resize(n_results);
+    if (!tasks.empty())
+    {
+      rd->post_tasks(std::move(tasks));
+    }
+
+    res.success.value = true;
+    res.req_id.value = register_reader(std::move(rd));
+    score_reqs.emplace(res.req_id.value, std::move(batch));
+    return res;
+  }
+
   json format_decision_response(const decision_request &dreq)
   {
     json answers = json::object();
@@ -858,6 +888,19 @@ struct wllama_context
       return res;
     }
     server_response_reader &rd = *it->second;
+
+    auto score_it = score_reqs.find(req.req_id.value);
+    if (score_it != score_reqs.end() && !rd.has_next())
+    {
+      // every item failed to render, so there was no task
+      res.success.value = true;
+      res.has_more.value = false;
+      res.data_json.value = server_score_response(score_it->second).dump();
+      res.is_error.value = false;
+      readers.erase(it);
+      score_reqs.erase(score_it);
+      return res;
+    }
 
     run_loop();
     auto [result, is_error] = get_next_result(rd);
@@ -900,6 +943,22 @@ struct wllama_context
           data_json = format_decision_response(dreq);
         }
       }
+      else if (auto *sres = dynamic_cast<server_task_result_score *>(result.get()))
+      {
+        // only send the scores once all the tasks are done
+        auto &batch = score_reqs.at(req.req_id.value);
+        GGML_ASSERT(sres->index < batch.log_probs.size());
+        batch.log_probs[sres->index] = sres->log_prob;
+        batch.n_scored[sres->index] = sres->n_scored;
+        if (has_more)
+        {
+          result = nullptr;
+        }
+        else
+        {
+          data_json = server_score_response(batch);
+        }
+      }
       else
       {
         // completion result
@@ -916,6 +975,7 @@ struct wllama_context
     {
       readers.erase(it);
       decision_reqs.erase(req.req_id.value);
+      score_reqs.erase(req.req_id.value);
     }
     return res;
   }
@@ -931,6 +991,7 @@ struct wllama_context
       // reader destructor posts cancel tasks; run one loop iteration to release the slot right away
       readers.erase(it);
       decision_reqs.erase(req.req_id.value);
+      score_reqs.erase(req.req_id.value);
       run_loop();
     }
 
@@ -1035,14 +1096,28 @@ void server_queue::cleanup_pending_task(int id_target)
       queue_tasks_deferred.end());
 }
 
+// a task that finds no free slot waits here until a slot is released
 void server_queue::defer(server_task &&task)
 {
-  assert(false && "should not be called in wllama");
+  queue_tasks_deferred.push_back(std::move(task));
 }
 
 void server_queue::pop_deferred_task(int id_slot)
 {
-  // no deferred task in wllama, so this is a no-op
+  if (queue_tasks_deferred.empty())
+  {
+    return;
+  }
+  // prefer a task that asks for this slot, otherwise the oldest one
+  auto it = std::find_if(queue_tasks_deferred.begin(), queue_tasks_deferred.end(),
+                         [id_slot](const server_task &task)
+                         { return task.id_slot == id_slot; });
+  if (it == queue_tasks_deferred.end())
+  {
+    it = queue_tasks_deferred.begin();
+  }
+  queue_tasks.emplace_front(std::move(*it));
+  queue_tasks_deferred.erase(it);
 }
 
 void server_queue::wait_until_no_sleep()

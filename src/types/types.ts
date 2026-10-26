@@ -66,6 +66,10 @@ export interface LoadModelParams {
    */
   lora_adapters?: { path?: string; blob?: Blob; scale?: number }[];
   lora_init_without_apply?: boolean;
+  /**
+   * natlang native state spans (GGUF, llama.cpp `common/native-state.h`) loaded with the model, each from a `path` inside the wasm FS or a `blob`. A chat message content part `{ type: 'native_state', id }` consumes the state with that ID.
+   */
+  native_states?: { path?: string; blob?: Blob }[];
   spec_draft_model?: string;
   spec_draft_ngl?: number;
   spec_draft_n_max?: number;

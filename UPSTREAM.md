@@ -30,3 +30,41 @@ Base history: first written on wllama 3.6.1 (llama.cpp 83d855c5a; that submodule
 The llama.cpp change is cherry-picked onto upstream's pin 5aeac37 (`patches/llama.cpp-server-lora-cache.patch`); the
 submodule points at https://github.com/werg/llama.cpp-neuralese, where that commit is tag `wllama-natlang-lora-5aeac37`.
 The smoke above passes unchanged on the merged build (identical greedy outputs to the 3.6.1-based build).
+
+# natlang native state spans and decision readout (llama.cpp-neuralese `wllama-natlang` 9ff259a)
+
+The llama.cpp submodule moves to the fork's `wllama-natlang` branch: ee85d96 plus two natlang features, both also
+served by the fork's native `llama-server`.
+
+## Native state spans
+
+- llama.cpp: `llama_state_span_register` imports exact per-layer state (attention keys before RoPE and values, LFM2
+  short-convolution gated inputs) for virtual tokens; the server loads spans with `--native-state` and consumes one
+  where a chat message has a `{"type": "native_state", "id"}` content part (cherry-pick of the fork's 6eff883, without
+  `--lora-per-sequence`). Prompts submitted as CLI tasks (wllama's path) are tokenized the same way.
+- wllama: `LoadModelParams.native_states` takes `{ path }` or `{ blob }` entries (blobs are mounted as their own files,
+  like LoRA blobs); `Wllama.capabilities.nativeStates`.
+
+## Decision readout
+
+- llama.cpp server: `POST /v1/natlang/score` scores candidate replies (each as the closed final assistant message,
+  summed over its tokens after the rendered prompt; the replies of an item share the prompt prefix). Task building and
+  the response are shared functions (`server_score_tasks`, `server_score_response`). An explicit
+  `"continue_final_message": false` now renders a final assistant message closed.
+- wllama: `Wllama.createNatlangScore({ items })` (glue action `score`), `Wllama.capabilities.natlangScore`.
+
+## Fixes found on the way
+
+- `server_queue::defer` was a stub (`assert(false)`, compiled out), so a task that found no free slot was dropped and
+  its reader waited forever (for example more scored replies, or systemone groups, than `n_parallel`). Deferred tasks
+  now wait in `queue_tasks_deferred` and return to the queue when a slot is released, as in the native server.
+- A failing action returned no message and the caller saw `Invalid magic number`; it now returns `glue_msg_error`,
+  which the worker raises as `WllamaRuntimeError` with the original message.
+- Chat content parts other than text were all treated as media; `native_state` parts now pass through.
+
+Verified in headless Chromium against the fork's native `llama-server` (natlang `ts-host/scripts/wllama-fork-smoke.mjs`,
+LFM2.5-350M F32, CPU): answers consuming native states match the native server token for token and within 0.05 in
+log-probability, a state not loaded is refused with the server's message, and decision readout matches. The LoRA smoke
+(`wllama-lora-smoke.mjs`, two random rank-8 LoRAs) passes 7/7.
+
+Build: `scripts/docker-compose.yml` steps run with a local emsdk 4.0.20 (x86_64).

@@ -114,6 +114,7 @@ extern "C" const char *wllama_action(const char *name, const char *req_raw)
     WLLAMA_ACTION(embedding)
     WLLAMA_ACTION(rerank)
     WLLAMA_ACTION(systemone)
+    WLLAMA_ACTION(score)
     WLLAMA_ACTION(get_result)
     WLLAMA_ACTION(cancel)
     WLLAMA_ACTION(test_backend_ops)
@@ -131,8 +132,14 @@ extern "C" const char *wllama_action(const char *name, const char *req_raw)
   }
   catch (std::exception &e)
   {
+    // the caller gets the error message instead of a response
     printStr(GGML_LOG_LEVEL_ERROR, e.what());
-    return nullptr;
+    glue_msg_error err;
+    err.message.value = e.what();
+    err.handler.serialize(output_buffer);
+    uint32_t *output_len = (uint32_t *)req_raw;
+    output_len[0] = output_buffer.data.size();
+    return output_buffer.data.data();
   }
 }
 

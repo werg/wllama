@@ -545,6 +545,7 @@ struct glue_msg_load_req
   GLUE_FIELD_NULLABLE(arr_str, lora_paths)
   GLUE_FIELD_NULLABLE(arr_float, lora_scales)
   GLUE_FIELD_NULLABLE(bool, lora_init_without_apply)
+  GLUE_FIELD_NULLABLE(arr_str, native_state_paths)
   GLUE_FIELD_NULLABLE(str, spec_draft_model)
   GLUE_FIELD_NULLABLE(int, spec_draft_ngl)
   GLUE_FIELD_NULLABLE(int, spec_draft_n_max)
@@ -646,6 +647,21 @@ struct glue_msg_systemone_req
 struct glue_msg_systemone_res
 {
   GLUE_HANDLER("sys1_res")
+  GLUE_FIELD(bool, success)
+  GLUE_FIELD(int, req_id)
+};
+
+/////////
+
+struct glue_msg_score_req
+{
+  GLUE_HANDLER("scor_req")
+  GLUE_FIELD(str, data_json)
+};
+
+struct glue_msg_score_res
+{
+  GLUE_HANDLER("scor_res")
   GLUE_FIELD(bool, success)
   GLUE_FIELD(int, req_id)
 };

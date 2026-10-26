@@ -17,10 +17,17 @@ export interface ChatCompletionMessageAudio {
   data: ArrayBuffer;
 }
 
+// A natlang native state span loaded with the model (`native_states`), consumed at this position
+export interface ChatCompletionMessageNativeState {
+  type: 'native_state';
+  id: string;
+}
+
 export type ChatCompletionMessageContent =
   | ChatCompletionMessageText
   | ChatCompletionMessageImage
-  | ChatCompletionMessageAudio;
+  | ChatCompletionMessageAudio
+  | ChatCompletionMessageNativeState;
 
 // Tool definitions
 
@@ -61,7 +68,7 @@ export type ChatCompletionToolChoice =
 
 export interface ChatCompletionSystemMessage {
   role: 'system';
-  content: string;
+  content: string | ChatCompletionMessageContent[];
   name?: string;
 }
 
@@ -402,4 +409,25 @@ export interface SystemOneResponse {
     input_tokens: number;
     output_tokens: number;
   };
+}
+
+// natlang decision readout (see llama.cpp server /v1/natlang/score)
+
+export interface NatlangScoreItem {
+  messages: ChatCompletionMessage[];
+  /** Each reply, scored as the closed final assistant message after `messages` */
+  continuations: string[];
+  tools?: any[];
+  /** LoRA adapter scales for this item, as in a completion request */
+  lora?: { id: number; scale: number }[];
+}
+
+export interface NatlangScoreParams {
+  items: NatlangScoreItem[];
+  lora?: { id: number; scale: number }[];
+}
+
+export interface NatlangScoreResponse {
+  /** Per item: the summed log-probability and the number of the reply tokens after the prompt, or why the item failed */
+  results: ({ log_probs: number[]; tokens: number[] } | { error: string })[];
 }

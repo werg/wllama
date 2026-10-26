@@ -22,6 +22,7 @@ import type {
   GlueMsgEmbeddingRes,
   GlueMsgRerankRes,
   GlueMsgSystemoneRes,
+  GlueMsgScoreRes,
   GlueMsgGetResultRes,
   GlueMsgLoadRes,
   GlueMsgTestBackendOpsRes,
@@ -46,6 +47,8 @@ import type {
   RerankResponse,
   SystemOneParams,
   SystemOneResponse,
+  NatlangScoreParams,
+  NatlangScoreResponse,
 } from './types/oai-compat';
 import { LogLevel } from './types/types';
 import { getHFModelSource, type HuggingFaceParams } from './huggingface';
@@ -172,8 +175,12 @@ export class Wllama {
   // The CacheManager and ModelManager are singleton, can be accessed by user
   public cacheManager: CacheManager;
   public modelManager: ModelManager;
-  /** Feature detection: `loraBlobs` means `lora_adapters` accepts GGUF blobs. */
-  public readonly capabilities = { loraBlobs: true } as const;
+  /** Feature detection: `loraBlobs` means `lora_adapters` accepts GGUF blobs, `nativeStates` means `native_states` loads natlang native state spans, `natlangScore` means `createNatlangScore` is available. */
+  public readonly capabilities = {
+    loraBlobs: true,
+    nativeStates: true,
+    natlangScore: true,
+  } as const;
 
   private compat: WllamaCompat | null = null;
 
@@ -510,24 +517,51 @@ export class Wllama {
     }
 
     const modelFiles = await prepareBlobs(blobs);
-    // LoRA blobs are separate files next to the model, never model shards
+    // LoRA and native state blobs are separate files next to the model, never model shards
     const loraPaths: string[] = [];
-    const loraFiles: { name: string; blob: Blob }[] = [];
+    const sideFiles: { name: string; blob: Blob }[] = [];
     for (const [i, adapter] of (params.lora_adapters ?? []).entries()) {
       if (adapter.blob) {
         if (adapter.blob.size === 0) {
-          throw new WllamaError(`LoRA adapter ${i} is an empty Blob`, 'load_error');
+          throw new WllamaError(
+            `LoRA adapter ${i} is an empty Blob`,
+            'load_error'
+          );
         }
         const name = `lora-${padDigits(i + 1, 5)}.gguf`;
-        loraFiles.push({ name, blob: adapter.blob });
+        sideFiles.push({ name, blob: adapter.blob });
         loraPaths.push(`models/${name}`);
       } else if (adapter.path) {
         loraPaths.push(adapter.path);
       } else {
-        throw new WllamaError(`LoRA adapter ${i} needs a path or a blob`, 'load_error');
+        throw new WllamaError(
+          `LoRA adapter ${i} needs a path or a blob`,
+          'load_error'
+        );
       }
     }
-    await this.proxy.moduleInit([...modelFiles.all, ...loraFiles]);
+    const statePaths: string[] = [];
+    for (const [i, state] of (params.native_states ?? []).entries()) {
+      if (state.blob) {
+        if (state.blob.size === 0) {
+          throw new WllamaError(
+            `Native state ${i} is an empty Blob`,
+            'load_error'
+          );
+        }
+        const name = `native-state-${padDigits(i + 1, 5)}.gguf`;
+        sideFiles.push({ name, blob: state.blob });
+        statePaths.push(`models/${name}`);
+      } else if (state.path) {
+        statePaths.push(state.path);
+      } else {
+        throw new WllamaError(
+          `Native state ${i} needs a path or a blob`,
+          'load_error'
+        );
+      }
+    }
+    await this.proxy.moduleInit([...modelFiles.all, ...sideFiles]);
 
     // run it
     this.logger().debug('Calling wllamaStart...');
@@ -590,6 +624,7 @@ export class Wllama {
       lora_paths: params.lora_adapters ? loraPaths : undefined,
       lora_scales: params.lora_adapters?.map((a) => a.scale ?? 1.0),
       lora_init_without_apply: params.lora_init_without_apply,
+      native_state_paths: params.native_states ? statePaths : undefined,
       spec_draft_model: params.spec_draft_model,
       spec_draft_ngl: params.spec_draft_ngl,
       spec_draft_n_max: params.spec_draft_n_max,
@@ -774,6 +809,31 @@ export class Wllama {
     return await this.getSingleResult<SystemOneResponse>(
       result.req_id,
       'systemone'
+    );
+  }
+
+  /**
+   * Score candidate replies to chat messages (natlang decision readout): the log-probability of each reply as the closed final assistant message, summed over its tokens after the chat prompt. The replies of an item share the prompt.
+   * @param options The items to score
+   * @returns Per item, the log-probability and token count of each reply, or the error of an item that could not be rendered
+   */
+  async createNatlangScore(
+    options: NatlangScoreParams
+  ): Promise<NatlangScoreResponse> {
+    this.checkModelLoaded();
+
+    const result = await this.proxy.wllamaAction<GlueMsgScoreRes>('score', {
+      _name: 'scor_req',
+      data_json: JSON.stringify(options),
+    });
+
+    if (!result.success) {
+      throw new WllamaError('Model failed to start scoring', 'inference_error');
+    }
+
+    return await this.getSingleResult<NatlangScoreResponse>(
+      result.req_id,
+      'score'
     );
   }
 
@@ -1030,8 +1090,8 @@ export class Wllama {
       if (Array.isArray(m.content)) {
         const newContent: typeof m.content = [];
         for (const c of m.content) {
-          if (c.type === 'text') {
-            // no transform for text content
+          if (c.type === 'text' || c.type === 'native_state') {
+            // no transform for text content and native states
             newContent.push(c);
           } else {
             // replace multimodal input with media marker
