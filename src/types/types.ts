@@ -59,7 +59,12 @@ export interface LoadModelParams {
   ctx_shift?: boolean;
   cache_idle_slots?: boolean;
   n_cache_reuse?: number;
-  lora_adapters?: { path: string; scale?: number }[];
+  /**
+   * LoRA adapters loaded with the model. Give each either a `path` inside the wasm FS or a GGUF `blob`, which is
+   * mounted as its own file (never as a model shard). With `lora_init_without_apply`, every adapter starts at scale 0
+   * and a completion selects its own adapters and scales with `lora: [{ id, scale }]`, `id` being the index here.
+   */
+  lora_adapters?: { path?: string; blob?: Blob; scale?: number }[];
   lora_init_without_apply?: boolean;
   spec_draft_model?: string;
   spec_draft_ngl?: number;

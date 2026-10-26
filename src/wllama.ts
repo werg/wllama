@@ -12,6 +12,7 @@ import {
   MMPROJ_FILE_NAME,
   needCompat,
   prepareBlobs,
+  padDigits,
 } from './utils';
 import CacheManager, { type DownloadOptions } from './cache-manager';
 import { ModelManager, Model, type ModelSource } from './model-manager';
@@ -168,6 +169,8 @@ export class Wllama {
   // The CacheManager and ModelManager are singleton, can be accessed by user
   public cacheManager: CacheManager;
   public modelManager: ModelManager;
+  /** Feature detection: `loraBlobs` means `lora_adapters` accepts GGUF blobs. */
+  public readonly capabilities = { loraBlobs: true } as const;
 
   private compat: WllamaCompat | null = null;
 
@@ -504,7 +507,24 @@ export class Wllama {
     }
 
     const modelFiles = await prepareBlobs(blobs);
-    await this.proxy.moduleInit(modelFiles.all);
+    // LoRA blobs are separate files next to the model, never model shards
+    const loraPaths: string[] = [];
+    const loraFiles: { name: string; blob: Blob }[] = [];
+    for (const [i, adapter] of (params.lora_adapters ?? []).entries()) {
+      if (adapter.blob) {
+        if (adapter.blob.size === 0) {
+          throw new WllamaError(`LoRA adapter ${i} is an empty Blob`, 'load_error');
+        }
+        const name = `lora-${padDigits(i + 1, 5)}.gguf`;
+        loraFiles.push({ name, blob: adapter.blob });
+        loraPaths.push(`models/${name}`);
+      } else if (adapter.path) {
+        loraPaths.push(adapter.path);
+      } else {
+        throw new WllamaError(`LoRA adapter ${i} needs a path or a blob`, 'load_error');
+      }
+    }
+    await this.proxy.moduleInit([...modelFiles.all, ...loraFiles]);
 
     // run it
     this.logger().debug('Calling wllamaStart...');
@@ -564,7 +584,7 @@ export class Wllama {
       ctx_shift: params.ctx_shift,
       cache_idle_slots: params.cache_idle_slots,
       n_cache_reuse: params.n_cache_reuse,
-      lora_paths: params.lora_adapters?.map((a) => a.path),
+      lora_paths: params.lora_adapters ? loraPaths : undefined,
       lora_scales: params.lora_adapters?.map((a) => a.scale ?? 1.0),
       lora_init_without_apply: params.lora_init_without_apply,
       spec_draft_model: params.spec_draft_model,
