@@ -1,4 +1,4 @@
-# natlang-lora patch (on wllama 3.6.1)
+# natlang LoRA patch (on wllama master 3bb2a46, llama.cpp 5aeac37)
 
 Two small changes let a page serve tuned LoRA stacks with per-request scales. Both are intended for upstreaming.
 
@@ -24,3 +24,9 @@ request with the server's existing field: `createCompletion({ ..., lora: [{ id, 
 Verified: natlang `ts-host/scripts/wllama-lora-smoke.mjs` (headless Chromium, LFM2.5-350M f16 + two LoRAs): each adapter
 changes greedy output, returning to the base (explicitly or with no `lora` field) reproduces it exactly, and every
 stack is reproducible after other stacks.
+
+Base history: first written on wllama 3.6.1 (llama.cpp 83d855c5a; that submodule commit is kept as tag
+`wllama-natlang-lora-b10664` in https://github.com/werg/llama.cpp-neuralese), then merged with upstream master 3bb2a46.
+The llama.cpp change is cherry-picked onto upstream's pin 5aeac37 (`patches/llama.cpp-server-lora-cache.patch`); the
+submodule points at https://github.com/werg/llama.cpp-neuralese, where that commit is tag `wllama-natlang-lora-5aeac37`.
+The smoke above passes unchanged on the merged build (identical greedy outputs to the 3.6.1-based build).

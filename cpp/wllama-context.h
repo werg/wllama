@@ -19,6 +19,7 @@
 #include "wllama.h"
 
 #include "server-context.h"
+#include "server-decision.h"
 #include "server-queue.h"
 #include "server-schema.h"
 
@@ -266,6 +267,16 @@ struct wllama_context
   int next_req_id = 1;
   std::unique_ptr<const server_context_meta> meta;
 
+  // the one inside ctx_server is private, so we keep our own copy
+  server_decision_context decision;
+  struct decision_request
+  {
+    std::vector<server_decision_question> questions;
+    std::vector<std::vector<float>> scores; // indexed by task index
+    int32_t n_tokens = 0;
+  };
+  std::unordered_map<int, decision_request> decision_reqs; // keyed by req_id
+
   struct console
   {
     struct spinner
@@ -283,14 +294,17 @@ struct wllama_context
   {
     json body = json::parse(req_raw);
     task_response_type res_type = TASK_RESPONSE_TYPE_OAI_CMPL;
+    common_chat_session chat_session;
 
     if (is_chat)
     {
       std::vector<raw_buffer> dummy_files; // unused
       json body_parsed = oaicompat_chat_params_parse(
+          vocab,
           body,
           meta->chat_params,
-          dummy_files);
+          dummy_files,
+          chat_session);
       body = std::move(body_parsed);
       res_type = TASK_RESPONSE_TYPE_OAI_CHAT;
     }
@@ -311,8 +325,11 @@ struct wllama_context
       task.cli_prompt = prompt;
       task.cli_files = files;
       task.cli = true;
+      task.apply_chat_session(chat_session);
 
-      rd.post_task({std::move(task)});
+      std::vector<server_task> tasks;
+      tasks.push_back(std::move(task));
+      rd.post_tasks(std::move(tasks), chat_session);
     }
   }
 
@@ -598,6 +615,7 @@ struct wllama_context
     model = llama_get_model(ctx);
     vocab = llama_model_get_vocab(model);
     meta = std::make_unique<server_context_meta>(ctx_server.get_meta());
+    decision.init(model);
     auto metadata = dump_metadata();
 
     // get EOG tokens
@@ -753,6 +771,77 @@ struct wllama_context
     return res;
   }
 
+  glue_msg_systemone_res action_systemone(const char *req_raw)
+  {
+    PARSE_REQ(glue_msg_systemone_req);
+    glue_msg_systemone_res res;
+
+    if (decision.type == COMMON_DECISION_TYPE_NONE)
+    {
+      throw app_exception("This model is not a decision model");
+    }
+
+    json body = json::parse(req.data_json.value);
+    decision_request dreq;
+    dreq.questions = decision.parse_questions(body);
+
+    std::vector<raw_buffer> files;
+    const json state = decision.parse_state(body, files);
+    if (!files.empty())
+    {
+      throw app_exception("Image input is not supported for systemone");
+    }
+
+    auto rd = std::make_unique<server_response_reader>(ctx_server.get_response_reader());
+
+    // one task per variant of each question
+    std::vector<server_task> tasks;
+    for (const auto &question : dreq.questions)
+    {
+      for (size_t variant = 0; variant < decision.n_variants(question); variant++)
+      {
+        server_task task = server_task(SERVER_TASK_TYPE_DECISION);
+        task.id = rd->get_new_id();
+        decision.fill_task(state, dreq.questions, question, variant, files, nullptr, mtmd_helper_init_opt_default(), task);
+        tasks.push_back(std::move(task));
+      }
+    }
+    dreq.scores.resize(tasks.size());
+    if (decision.can_share_prompt())
+    {
+      tasks = server_decision_group_tasks(std::move(tasks), params.n_parallel);
+    }
+    rd->post_tasks(std::move(tasks));
+
+    res.success.value = true;
+    res.req_id.value = register_reader(std::move(rd));
+    decision_reqs.emplace(res.req_id.value, std::move(dreq));
+    return res;
+  }
+
+  json format_decision_response(const decision_request &dreq)
+  {
+    json answers = json::object();
+    size_t i_result = 0;
+    for (const auto &question : dreq.questions)
+    {
+      std::vector<std::vector<float>> scores;
+      for (size_t variant = 0; variant < decision.n_variants(question); variant++)
+      {
+        scores.push_back(dreq.scores[i_result++]);
+      }
+      answers[question.id] = decision.format_answer(question, scores);
+    }
+    return json{
+        {"model", meta->model_name},
+        {"answers", answers},
+        {"usage", {
+                      {"input_tokens", dreq.n_tokens},
+                      {"output_tokens", 0},
+                  }},
+    };
+  }
+
   glue_msg_get_result_res action_get_result(const char *req_raw)
   {
     PARSE_REQ(glue_msg_get_result_req);
@@ -795,6 +884,22 @@ struct wllama_context
             {"tokens_evaluated", rerank->n_tokens},
         };
       }
+      else if (auto *dres = dynamic_cast<server_task_result_decision *>(result.get()))
+      {
+        // only send the answers once all the tasks are done
+        auto &dreq = decision_reqs.at(req.req_id.value);
+        GGML_ASSERT(dres->index >= 0 && (size_t)dres->index < dreq.scores.size());
+        dreq.scores[dres->index] = std::move(dres->scores);
+        dreq.n_tokens += dres->n_tokens;
+        if (has_more)
+        {
+          result = nullptr;
+        }
+        else
+        {
+          data_json = format_decision_response(dreq);
+        }
+      }
       else
       {
         // completion result
@@ -810,6 +915,7 @@ struct wllama_context
     if (!has_more)
     {
       readers.erase(it);
+      decision_reqs.erase(req.req_id.value);
     }
     return res;
   }
@@ -824,6 +930,7 @@ struct wllama_context
     {
       // reader destructor posts cancel tasks; run one loop iteration to release the slot right away
       readers.erase(it);
+      decision_reqs.erase(req.req_id.value);
       run_loop();
     }
 
@@ -1051,12 +1158,12 @@ void server_response_reader::post_task(server_task &&task, bool front)
   GGML_ASSERT(!task.is_parent() && "not supported, use post_tasks() instead");
   task.index = 0;
   id_tasks.insert(task.id);
-  states.push_back(task.create_state());
+  states.push_back(task_result_state());
   queue_results.add_waiting_task_id(task.id);
   queue_tasks.post(std::move(task), front);
 }
 
-void server_response_reader::post_tasks(std::vector<server_task> &&tasks, bool front)
+void server_response_reader::post_tasks(std::vector<server_task> &&tasks, const common_chat_session &session, bool front)
 {
   LOG_DBG("%s\n", __func__);
   GGML_ASSERT(id_tasks.empty() && "post_tasks() can only be called once per reader");
@@ -1066,12 +1173,12 @@ void server_response_reader::post_tasks(std::vector<server_task> &&tasks, bool f
   for (auto &task : tasks)
   {
     task.index = index++;
-    states.push_back(task.create_state());
+    states.push_back(task_result_state(session));
     // for child tasks
     for (auto &child_task : task.child_tasks)
     {
       child_task.index = index++;
-      states.push_back(child_task.create_state());
+      states.push_back(task_result_state(session));
     }
   }
   GGML_ASSERT(states.size() == id_tasks.size());
