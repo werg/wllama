@@ -68,3 +68,19 @@ log-probability, a state not loaded is refused with the server's message, and de
 (`wllama-lora-smoke.mjs`, two random rank-8 LoRAs) passes 7/7.
 
 Build: `scripts/docker-compose.yml` steps run with a local emsdk 4.0.20 (x86_64).
+
+# natlang guided generation (llama.cpp-neuralese `wllama-natlang` b35efc8)
+
+- llama.cpp server: a `"guidance"` request field (`true` or `{require_call, tools, repeat, run, syntax, retries}`)
+  checks the reply while it is generated, as natlang's reference server: call names must be offered tools, and the
+  code of `eval(code=...)` calls is checked line by line for repetition, redeclaration and TypeScript syntax
+  (tree-sitter with the TypeScript grammar, vendored in `llama.cpp/vendor/tree-sitter`). A rejected point is rolled
+  back (slot memory cut or a context checkpoint restored), its token banned and sampled again. Responses carry
+  `x_natlang_guidance: {rejections}`; a streamed guided reply arrives with the final chunk.
+  `POST /v1/neuralese/guidance/check` checks a fixed reply.
+- wllama: the build adds `llama.cpp/vendor/tree-sitter` and `server-guidance.cpp`; `guidance` passes through
+  `createChatCompletion` like other request fields.
+
+Verified in headless Chromium against the fork's native `llama-server` (`wllama-fork-smoke.mjs`, LFM2.5-350M F32, CPU):
+a guided tool call whose first attempt fails the syntax check is rolled back and equals the native server's reply
+and rejections; the other checks still pass (14/14), and the LoRA smoke passes 7/7.

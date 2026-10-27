@@ -78,6 +78,7 @@ add_subdirectory(llama.cpp)
 
 set(LLAMA_INSTALL_VERSION 0.0.${LLAMA_BUILD_NUMBER})
 add_subdirectory(llama.cpp/tools/mtmd)
+add_subdirectory(llama.cpp/vendor/tree-sitter)
 
 file(GLOB_RECURSE LLAMA_COMMON_SRC
     CONFIGURE_DEPENDS
@@ -104,6 +105,7 @@ set(LLAMA_SERVER_SRC llama.cpp/tools/server/server-context.cpp
     llama.cpp/tools/server/server-chat.cpp
     llama.cpp/tools/server/server-common.cpp
     llama.cpp/tools/server/server-decision.cpp
+    llama.cpp/tools/server/server-guidance.cpp
     llama.cpp/tools/server/server-schema.cpp
     llama.cpp/tools/server/server-stream.cpp
 )
@@ -131,4 +133,4 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/llama.cpp/tools/server)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/llama.cpp/tools/mtmd)
 
 add_executable(wllama ${WLLAMA_SRC})
-target_link_libraries(wllama PRIVATE ggml llama mtmd ${CMAKE_THREAD_LIBS_INIT})
+target_link_libraries(wllama PRIVATE ggml llama mtmd vendor::tree-sitter-typescript ${CMAKE_THREAD_LIBS_INIT})
