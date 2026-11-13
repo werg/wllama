@@ -74,6 +74,24 @@ endif()
 add_compile_options(${WLLAMA_COMPILE_OPTIONS})
 add_link_options(${WLLAMA_LINK_OPTIONS})
 
+# Build info of the llama.cpp tree (its version line names the fork commit the page runs)
+find_package(Git)
+if(Git_FOUND)
+    execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/llama.cpp
+        OUTPUT_VARIABLE LLAMA_BUILD_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    execute_process(COMMAND ${GIT_EXECUTABLE} rev-list --count HEAD WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/llama.cpp
+        OUTPUT_VARIABLE LLAMA_BUILD_NUMBER OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+endif()
+if(NOT LLAMA_BUILD_COMMIT)
+    set(LLAMA_BUILD_COMMIT "unknown")
+endif()
+if(NOT LLAMA_BUILD_NUMBER)
+    set(LLAMA_BUILD_NUMBER 0)
+endif()
+set(BUILD_COMPILER "${CMAKE_C_COMPILER_ID} ${CMAKE_C_COMPILER_VERSION}")
+set(BUILD_TARGET "${CMAKE_SYSTEM_NAME} ${CMAKE_SYSTEM_PROCESSOR}")
+configure_file(llama.cpp/common/build-info.cpp.in ${CMAKE_CURRENT_BINARY_DIR}/build-info.cpp)
+
 add_subdirectory(llama.cpp)
 
 set(LLAMA_INSTALL_VERSION 0.0.${LLAMA_BUILD_NUMBER})
@@ -106,11 +124,14 @@ set(LLAMA_SERVER_SRC llama.cpp/tools/server/server-context.cpp
     llama.cpp/tools/server/server-common.cpp
     llama.cpp/tools/server/server-decision.cpp
     llama.cpp/tools/server/server-guidance.cpp
+    llama.cpp/tools/server/server-native-state.cpp
+    llama.cpp/tools/server/server-realtime.cpp
+    llama.cpp/tools/server/server-rl-capture.cpp
     llama.cpp/tools/server/server-schema.cpp
     llama.cpp/tools/server/server-stream.cpp
 )
 
-set(WLLAMA_SRC ${LLAMA_COMMON_SRC} ${LLAMA_SERVER_SRC}
+set(WLLAMA_SRC ${LLAMA_COMMON_SRC} ${LLAMA_SERVER_SRC} ${CMAKE_CURRENT_BINARY_DIR}/build-info.cpp
     cpp/wllama.cpp
     cpp/glue.hpp
     llama.cpp/include/llama.h)

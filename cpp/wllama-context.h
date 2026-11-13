@@ -762,7 +762,7 @@ struct wllama_context
 
     auto rd = std::make_unique<server_response_reader>(ctx_server.get_response_reader());
 
-    auto tokens = format_prompt_rerank(model, vocab, nullptr, query, document, mtmd_helper_init_opt_default());
+    auto tokens = format_prompt_rerank(model, vocab, nullptr, query, document, {}, {}, mtmd_helper_init_opt_default());
     server_task task = server_task(SERVER_TASK_TYPE_RERANK);
     task.id = rd->get_new_id();
     task.index = 0;
@@ -1216,11 +1216,6 @@ void server_queue::start_loop(int64_t idle_sleep_ms)
   callback_update_slots();
 
   has_more_tasks = !queue_tasks.empty();
-}
-
-const char *llama_build_info()
-{
-  return "wllama";
 }
 
 ////////////////////////////
