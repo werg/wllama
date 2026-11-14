@@ -327,6 +327,7 @@ struct wllama_context
       task.cli_files = files;
       task.cli = true;
       task.apply_chat_session(chat_session);
+      task.id_slot = json_value(body, "id_slot", -1);
 
       std::vector<server_task> tasks;
       tasks.push_back(std::move(task));
@@ -846,6 +847,53 @@ struct wllama_context
     res.success.value = true;
     res.req_id.value = register_reader(std::move(rd));
     score_reqs.emplace(res.req_id.value, std::move(batch));
+    return res;
+  }
+
+  // same as the server's POST /slots/:id?action=save|restore|erase; the file lives in /slots of the in-memory FS
+  glue_msg_slots_res action_slots(const char *req_raw)
+  {
+    PARSE_REQ(glue_msg_slots_req);
+    glue_msg_slots_res res;
+
+    const std::string &action = req.action.value;
+    server_task_type type;
+    if (action == "save")
+      type = SERVER_TASK_TYPE_SLOT_SAVE;
+    else if (action == "restore")
+      type = SERVER_TASK_TYPE_SLOT_RESTORE;
+    else if (action == "erase")
+      type = SERVER_TASK_TYPE_SLOT_ERASE;
+    else
+      throw app_exception("Invalid slot action: " + action);
+    if (type != SERVER_TASK_TYPE_SLOT_ERASE && !fs_validate_filename(req.filename.value))
+      throw app_exception("Invalid slot filename");
+
+    auto rd = std::make_unique<server_response_reader>(ctx_server.get_response_reader());
+    server_task task(type);
+    task.id = rd->get_new_id();
+    task.slot_action.id_slot = req.id_slot.value;
+    task.slot_action.filename = req.filename.value;
+    task.slot_action.filepath = "/slots/" + req.filename.value;
+    rd->post_task(std::move(task));
+
+    res.success.value = true;
+    res.req_id.value = register_reader(std::move(rd));
+    return res;
+  }
+
+  // same as the server's POST /apply-template
+  glue_msg_apply_template_res action_apply_template(const char *req_raw)
+  {
+    PARSE_REQ(glue_msg_apply_template_req);
+    glue_msg_apply_template_res res;
+
+    json body = json::parse(req.data_json.value);
+    std::vector<raw_buffer> files;
+    common_chat_session session;
+    json data = oaicompat_chat_params_parse(vocab, body, meta->chat_params, files, session);
+    res.success.value = true;
+    res.prompt.value = data.at("prompt").get<std::string>();
     return res;
   }
 

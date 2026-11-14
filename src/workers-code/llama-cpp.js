@@ -227,6 +227,8 @@ const patchHeapFS = () => {
   // mount FS
   m.FS.mkdir('/models');
   m.FS.mount(m.MEMFS, { root: '.' }, '/models');
+  // slot save files (action "slots"), moved to and from the main thread as bytes
+  m.FS.mkdir('/slots');
 };
 
 // Allocate a new file in wllama heapfs, returns file ID
@@ -505,6 +507,41 @@ onmessage = async (e) => {
     } catch (err) {
       handleError(err);
     }
+    return;
+  }
+
+  if (verb === 'fs.slot_read') {
+    const argFilename = args[0];
+    try {
+      const path = '/slots/' + argFilename;
+      const data = Module.FS.readFile(path);
+      Module.FS.unlink(path);
+      msg({ callbackId, result: data }, [data.buffer]);
+    } catch (err) {
+      msg({ callbackId, err: `cannot read slot file ${argFilename}: ${err}` });
+    }
+    return;
+  }
+
+  if (verb === 'fs.slot_write') {
+    const argFilename = args[0];
+    const argData = args[1];
+    try {
+      Module.FS.writeFile('/slots/' + argFilename, argData);
+      msg({ callbackId, result: null });
+    } catch (err) {
+      msg({ callbackId, err: `cannot write slot file ${argFilename}: ${err}` });
+    }
+    return;
+  }
+
+  if (verb === 'fs.slot_remove') {
+    try {
+      Module.FS.unlink('/slots/' + args[0]);
+    } catch (err) {
+      // already removed
+    }
+    msg({ callbackId, result: null });
     return;
   }
 

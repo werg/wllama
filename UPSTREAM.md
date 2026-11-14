@@ -84,3 +84,25 @@ Build: `scripts/docker-compose.yml` steps run with a local emsdk 4.0.20 (x86_64)
 Verified in headless Chromium against the fork's native `llama-server` (`wllama-fork-smoke.mjs`, LFM2.5-350M F32, CPU):
 a guided tool call whose first attempt fails the syntax check is rolled back and equals the native server's reply
 and rejections; the other checks still pass (14/14), and the LoRA smoke passes 7/7.
+
+# natlang slot state: warm openings across page reloads
+
+The page keeps a prefilled prompt opening across reloads the way natlang's managed `llama-server` keeps it across
+restarts (`--slot-save-path`): it saves the slot, stores the bytes (natlang writes them to OPFS) and restores them later.
+
+- glue action `slots` (`id_slot`, `action` save|restore|erase, `filename`): the server's `POST /slots/:id?action=...`
+  task on a file in `/slots` of the in-memory FS. The worker moves the file to and from the main thread
+  (`fs.slot_read` removes it, `fs.slot_write`, `fs.slot_remove`).
+- glue action `apply_template`: the server's `POST /apply-template` (renders messages and tools with the chat template).
+- completions take `id_slot`, as on the server.
+- `Wllama.saveSlot(id) -> { state, n_saved, n_written }`, `restoreSlot(id, state)`, `eraseSlot(id)`, `applyTemplate(options)`,
+  `capabilities.slotState`.
+- `__wrap_fread` reads only `models/` files from the main thread (async file mode); other files, such as slot saves,
+  are read from the in-memory FS.
+
+The llama.cpp submodule moves to the fork's natlang-b12074 (dc9410950), the tree the fork's release builds this with.
+
+Verified in headless Chrome (natlang `BrowserLocalModel` over this build, LFM3-1.7B Q8_0, CPU, n_ctx 16384, 4 slots,
+`swa_full`): a 678-token opening saves to a 17 MB state and restores in 0.1 s after a reload; the first call then takes
+5.5 s instead of 98 s cold, a decision scores bit-identically to the load that saved the state (0.47 nats from a cold
+load, same ranking), and greedy turns are the same.

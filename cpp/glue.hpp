@@ -668,6 +668,38 @@ struct glue_msg_score_res
 
 /////////
 
+struct glue_msg_slots_req
+{
+  GLUE_HANDLER("slot_req")
+  GLUE_FIELD(int, id_slot)
+  GLUE_FIELD(str, action)
+  GLUE_FIELD(str, filename)
+};
+
+struct glue_msg_slots_res
+{
+  GLUE_HANDLER("slot_res")
+  GLUE_FIELD(bool, success)
+  GLUE_FIELD(int, req_id)
+};
+
+/////////
+
+struct glue_msg_apply_template_req
+{
+  GLUE_HANDLER("tmpl_req")
+  GLUE_FIELD(str, data_json)
+};
+
+struct glue_msg_apply_template_res
+{
+  GLUE_HANDLER("tmpl_res")
+  GLUE_FIELD(bool, success)
+  GLUE_FIELD(str, prompt)
+};
+
+/////////
+
 struct glue_msg_get_result_req
 {
   GLUE_HANDLER("gres_req")

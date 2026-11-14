@@ -23,6 +23,8 @@ import type {
   GlueMsgRerankRes,
   GlueMsgSystemoneRes,
   GlueMsgScoreRes,
+  GlueMsgSlotsRes,
+  GlueMsgApplyTemplateRes,
   GlueMsgGetResultRes,
   GlueMsgLoadRes,
   GlueMsgTestBackendOpsRes,
@@ -175,12 +177,15 @@ export class Wllama {
   // The CacheManager and ModelManager are singleton, can be accessed by user
   public cacheManager: CacheManager;
   public modelManager: ModelManager;
-  /** Feature detection: `loraBlobs` means `lora_adapters` accepts GGUF blobs, `nativeStates` means `native_states` loads natlang native state spans, `natlangScore` means `createNatlangScore` is available. */
+  /** Feature detection: `loraBlobs` means `lora_adapters` accepts GGUF blobs, `nativeStates` means `native_states` loads natlang native state spans, `natlangScore` means `createNatlangScore` is available, `slotState` means `saveSlot` / `restoreSlot` / `eraseSlot` / `applyTemplate` are available and completions accept `id_slot`. */
   public readonly capabilities = {
     loraBlobs: true,
     nativeStates: true,
     natlangScore: true,
+    slotState: true,
   } as const;
+
+  private slotFileId = 0;
 
   private compat: WllamaCompat | null = null;
 
@@ -835,6 +840,90 @@ export class Wllama {
       result.req_id,
       'score'
     );
+  }
+
+  /**
+   * Render chat messages (and tools) with the chat template, as the server's POST /apply-template does.
+   * @param options OAI-compatible chat completion options (messages, tools, add_generation_prompt, ...)
+   * @returns The prompt text
+   */
+  async applyTemplate(options: Record<string, unknown>): Promise<string> {
+    this.checkModelLoaded();
+    const result = await this.proxy.wllamaAction<GlueMsgApplyTemplateRes>(
+      'apply_template',
+      { _name: 'tmpl_req', data_json: JSON.stringify(options) }
+    );
+    if (!result.success) {
+      throw new WllamaError('Failed to apply chat template', 'inference_error');
+    }
+    return result.prompt;
+  }
+
+  /**
+   * Save the state of a slot (its KV cache, tokens and context checkpoints), as the server's POST /slots/:id?action=save does. The slot must be idle.
+   * @param idSlot The slot
+   * @returns The saved state, to give to `restoreSlot` of an engine with the same model, build and context settings
+   */
+  async saveSlot(
+    idSlot: number
+  ): Promise<{ state: Uint8Array; n_saved: number; n_written: number }> {
+    const filename = `wllama-slot-${++this.slotFileId}.bin`;
+    const res = await this.slotAction<{ n_saved: number; n_written: number }>(
+      idSlot,
+      'save',
+      filename
+    );
+    const state = await this.proxy.slotFileRead(filename);
+    return { state, n_saved: res.n_saved, n_written: res.n_written };
+  }
+
+  /**
+   * Restore a slot from a state of `saveSlot`, as the server's POST /slots/:id?action=restore does. A state that does not fit leaves the slot empty and throws.
+   * @param idSlot The slot
+   * @param state The saved state
+   * @returns The number of restored tokens and bytes read
+   */
+  async restoreSlot(
+    idSlot: number,
+    state: Uint8Array | Blob
+  ): Promise<{ n_restored: number; n_read: number }> {
+    const filename = `wllama-slot-${++this.slotFileId}.bin`;
+    const data =
+      state instanceof Uint8Array
+        ? state
+        : new Uint8Array(await state.arrayBuffer());
+    await this.proxy.slotFileWrite(filename, data);
+    try {
+      return await this.slotAction(idSlot, 'restore', filename);
+    } finally {
+      await this.proxy.slotFileRemove(filename);
+    }
+  }
+
+  /**
+   * Clear the cached prompt of a slot, as the server's POST /slots/:id?action=erase does.
+   * @param idSlot The slot
+   */
+  async eraseSlot(idSlot: number): Promise<{ n_erased: number }> {
+    return await this.slotAction(idSlot, 'erase', '');
+  }
+
+  private async slotAction<T>(
+    idSlot: number,
+    action: 'save' | 'restore' | 'erase',
+    filename: string
+  ): Promise<T> {
+    this.checkModelLoaded();
+    const result = await this.proxy.wllamaAction<GlueMsgSlotsRes>('slots', {
+      _name: 'slot_req',
+      id_slot: idSlot,
+      action,
+      filename,
+    });
+    if (!result.success) {
+      throw new WllamaError(`Failed to ${action} slot`, 'inference_error');
+    }
+    return await this.getSingleResult<T>(result.req_id, `slot ${action}`);
   }
 
   /**

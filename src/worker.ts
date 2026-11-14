@@ -41,6 +41,9 @@ interface TaskParam {
     | 'fs.alloc'
     | 'fs.write'
     | 'fs.read_res'
+    | 'fs.slot_read'
+    | 'fs.slot_write'
+    | 'fs.slot_remove'
     | 'wllama.start'
     | 'wllama.action'
     | 'wllama.exit'
@@ -225,6 +228,32 @@ export class ProxyToWorker {
       throw new WllamaRuntimeError(parsedResult.message, '');
     }
     return parsedResult as T;
+  }
+
+  /** Take a slot save file out of the worker's in-memory FS (the file is removed) */
+  async slotFileRead(fileName: string): Promise<Uint8Array> {
+    return await this.pushTask({
+      verb: 'fs.slot_read',
+      args: [fileName],
+      callbackId: this.taskId++,
+    });
+  }
+
+  /** Put a slot save file into the worker's in-memory FS */
+  async slotFileWrite(fileName: string, data: Uint8Array): Promise<void> {
+    await this.pushTask({
+      verb: 'fs.slot_write',
+      args: [fileName, data],
+      callbackId: this.taskId++,
+    });
+  }
+
+  async slotFileRemove(fileName: string): Promise<void> {
+    await this.pushTask({
+      verb: 'fs.slot_remove',
+      args: [fileName],
+      callbackId: this.taskId++,
+    });
   }
 
   async wllamaExit(): Promise<void> {

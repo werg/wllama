@@ -617,6 +617,74 @@ export const GLUE_MESSAGE_PROTOTYPES: { [name: string]: GlueMessageProto } = {
       }
     ]
   },
+  "slot_req": {
+    "name": "slot_req",
+    "structName": "glue_msg_slots_req",
+    "className": "GlueMsgSlotsReq",
+    "fields": [
+      {
+        "type": "int",
+        "name": "id_slot",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "action",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "filename",
+        "isNullable": false
+      }
+    ]
+  },
+  "slot_res": {
+    "name": "slot_res",
+    "structName": "glue_msg_slots_res",
+    "className": "GlueMsgSlotsRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "req_id",
+        "isNullable": false
+      }
+    ]
+  },
+  "tmpl_req": {
+    "name": "tmpl_req",
+    "structName": "glue_msg_apply_template_req",
+    "className": "GlueMsgApplyTemplateReq",
+    "fields": [
+      {
+        "type": "str",
+        "name": "data_json",
+        "isNullable": false
+      }
+    ]
+  },
+  "tmpl_res": {
+    "name": "tmpl_res",
+    "structName": "glue_msg_apply_template_res",
+    "className": "GlueMsgApplyTemplateRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "prompt",
+        "isNullable": false
+      }
+    ]
+  },
   "gres_req": {
     "name": "gres_req",
     "structName": "glue_msg_get_result_req",
@@ -880,6 +948,34 @@ export interface GlueMsgScoreRes {
   req_id: number;
 }
 
+// struct glue_msg_slots_req
+export interface GlueMsgSlotsReq {
+  _name: "slot_req";
+  id_slot: number;
+  action: string;
+  filename: string;
+}
+
+// struct glue_msg_slots_res
+export interface GlueMsgSlotsRes {
+  _name: "slot_res";
+  success: boolean;
+  req_id: number;
+}
+
+// struct glue_msg_apply_template_req
+export interface GlueMsgApplyTemplateReq {
+  _name: "tmpl_req";
+  data_json: string;
+}
+
+// struct glue_msg_apply_template_res
+export interface GlueMsgApplyTemplateRes {
+  _name: "tmpl_res";
+  success: boolean;
+  prompt: string;
+}
+
 // struct glue_msg_get_result_req
 export interface GlueMsgGetResultReq {
   _name: "gres_req";
@@ -921,4 +1017,4 @@ export interface GlueMsgTestBackendOpsRes {
 }
 
 
-export type GlueMsg = GlueMsgError | GlueMsgLoadReq | GlueMsgLoadRes | GlueMsgCompletionReq | GlueMsgCompletionRes | GlueMsgEmbeddingReq | GlueMsgEmbeddingRes | GlueMsgRerankReq | GlueMsgRerankRes | GlueMsgSystemoneReq | GlueMsgSystemoneRes | GlueMsgScoreReq | GlueMsgScoreRes | GlueMsgGetResultReq | GlueMsgGetResultRes | GlueMsgCancelReq | GlueMsgCancelRes | GlueMsgTestBackendOpsReq | GlueMsgTestBackendOpsRes;
+export type GlueMsg = GlueMsgError | GlueMsgLoadReq | GlueMsgLoadRes | GlueMsgCompletionReq | GlueMsgCompletionRes | GlueMsgEmbeddingReq | GlueMsgEmbeddingRes | GlueMsgRerankReq | GlueMsgRerankRes | GlueMsgSystemoneReq | GlueMsgSystemoneRes | GlueMsgScoreReq | GlueMsgScoreRes | GlueMsgSlotsReq | GlueMsgSlotsRes | GlueMsgApplyTemplateReq | GlueMsgApplyTemplateRes | GlueMsgGetResultReq | GlueMsgGetResultRes | GlueMsgCancelReq | GlueMsgCancelRes | GlueMsgTestBackendOpsReq | GlueMsgTestBackendOpsRes;

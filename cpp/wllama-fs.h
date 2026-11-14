@@ -30,6 +30,11 @@ namespace wllama_fs
     ready = true;
   }
 
+  bool is_model_path(const std::string &path)
+  {
+    return path.rfind("models/", 0) == 0 || path.rfind("/models/", 0) == 0;
+  }
+
   size_t try_cache(FILE *f, char *ptr, size_t req_bytes, size_t fpos)
   {
     if (f != cache_file || cache_data.empty())
@@ -96,8 +101,9 @@ extern "C"
     if (!wllama_fs::use_async)
       return __real_fread(ptr, size, nmemb, f);
 
+    // only model files are read from the main thread, other files (slot saves) live in the in-memory FS
     auto nit = s_file_path_map.find(f);
-    if (nit == s_file_path_map.end())
+    if (nit == s_file_path_map.end() || !wllama_fs::is_model_path(nit->second))
       return __real_fread(ptr, size, nmemb, f);
 
     size_t req_bytes = size * nmemb;
