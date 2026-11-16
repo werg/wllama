@@ -882,6 +882,43 @@ struct wllama_context
     return res;
   }
 
+  // natlang native states: put (verify, store as received, register; the result is {mode, meta} through get_result)
+  // or get (write a stored state's bytes to the file; meta_json is its metadata, req_id -1)
+  glue_msg_native_state_res action_native_state(const char *req_raw)
+  {
+    PARSE_REQ(glue_msg_native_state_req);
+    glue_msg_native_state_res res;
+    if (!fs_validate_filename(req.filename.value))
+      throw app_exception("Invalid native state filename");
+    const std::string path = "/slots/" + req.filename.value;
+    if (req.action.value == "get")
+    {
+      const auto found = ctx_server.get_native_state(req.id.value);
+      if (!found)
+        throw app_exception("neuralese-unknown-native-state: " + req.id.value);
+      std::ofstream out(path, std::ios::binary);
+      out.write(found->body.data(), (std::streamsize)found->body.size());
+      if (!out)
+        throw app_exception("cannot write native state file");
+      res.success.value = true;
+      res.req_id.value = -1;
+      res.meta_json.value = native_state_meta(req.id.value, found->block).dump();
+      return res;
+    }
+    if (req.action.value != "put")
+      throw app_exception("Invalid native state action: " + req.action.value);
+    auto rd = std::make_unique<server_response_reader>(ctx_server.get_response_reader());
+    server_task task(SERVER_TASK_TYPE_NATIVE_STATE_REGISTER);
+    task.id = rd->get_new_id();
+    task.native_state_id = req.id.value;
+    task.native_state_body = native_state_read_file(path);
+    rd->post_task(std::move(task));
+    res.success.value = true;
+    res.req_id.value = register_reader(std::move(rd));
+    res.meta_json.value = "";
+    return res;
+  }
+
   // same as the server's POST /apply-template
   glue_msg_apply_template_res action_apply_template(const char *req_raw)
   {

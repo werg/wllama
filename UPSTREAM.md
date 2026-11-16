@@ -106,3 +106,18 @@ Verified in headless Chrome (natlang `BrowserLocalModel` over this build, LFM3-1
 `swa_full`): a 678-token opening saves to a 17 MB state and restores in 0.1 s after a reload; the first call then takes
 5.5 s instead of 98 s cold, a decision scores bit-identically to the load that saved the state (0.47 nats from a cold
 load, same ranking), and greedy turns are the same.
+
+# natlang native states after load
+
+The page puts and reads natlang native states while the model is loaded, as the server's
+`PUT`/`GET /v1/neuralese/native-states/:id` do, in the one format every natlang engine shares (natlang's store file,
+`natlang.native-state/1`).
+
+- glue action `native_state` (`action` put|get, `id`, `filename`): put verifies the state in `/slots/<filename>`
+  (layout, finite values, content ID; `id`, when set, is the ID it must have), stores it as received and registers it
+  for exact consumption (the fork's `SERVER_TASK_TYPE_NATIVE_STATE_REGISTER` with the bytes, the HTTP PUT's task); get
+  writes a stored state's bytes (one the model produced, or one put or loaded) to the file (`server_context::get_native_state`).
+- `Wllama.putNativeState(state, id?) -> { mode, meta }`, `getNativeState(id) -> { state, meta }`,
+  `capabilities.nativeStateStore`.
+
+The llama.cpp submodule moves to the fork's 69cba25d9, the tree the fork's release builds this with.

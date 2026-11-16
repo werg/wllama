@@ -24,6 +24,7 @@ import type {
   GlueMsgSystemoneRes,
   GlueMsgScoreRes,
   GlueMsgSlotsRes,
+  GlueMsgNativeStateRes,
   GlueMsgApplyTemplateRes,
   GlueMsgGetResultRes,
   GlueMsgLoadRes,
@@ -177,12 +178,13 @@ export class Wllama {
   // The CacheManager and ModelManager are singleton, can be accessed by user
   public cacheManager: CacheManager;
   public modelManager: ModelManager;
-  /** Feature detection: `loraBlobs` means `lora_adapters` accepts GGUF blobs, `nativeStates` means `native_states` loads natlang native state spans, `natlangScore` means `createNatlangScore` is available, `slotState` means `saveSlot` / `restoreSlot` / `eraseSlot` / `applyTemplate` are available and completions accept `id_slot`. */
+  /** Feature detection: `loraBlobs` means `lora_adapters` accepts GGUF blobs, `nativeStates` means `native_states` loads natlang native state spans, `natlangScore` means `createNatlangScore` is available, `slotState` means `saveSlot` / `restoreSlot` / `eraseSlot` / `applyTemplate` are available and completions accept `id_slot`, `nativeStateStore` means `putNativeState` / `getNativeState` are available. */
   public readonly capabilities = {
     loraBlobs: true,
     nativeStates: true,
     natlangScore: true,
     slotState: true,
+    nativeStateStore: true,
   } as const;
 
   private slotFileId = 0;
@@ -924,6 +926,61 @@ export class Wllama {
       throw new WllamaError(`Failed to ${action} slot`, 'inference_error');
     }
     return await this.getSingleResult<T>(result.req_id, `slot ${action}`);
+  }
+
+  /**
+   * Store a natlang native state (natlang's store-file format, natlang.native-state/1) after the model is loaded, as the
+   * server's PUT /v1/neuralese/native-states/:id does: the bytes are verified (layout, finite values, content ID), kept as
+   * received and, for a state of this model's identity, registered so prompts consume it exactly.
+   * @param state The state's bytes
+   * @param id The ID the state must have (its content ID); omit to accept any
+   * @returns The consumption mode and the state's metadata ({id, ...metadata})
+   */
+  async putNativeState(
+    state: Uint8Array | Blob,
+    id = ''
+  ): Promise<{ mode: string; meta: Record<string, unknown> }> {
+    this.checkModelLoaded();
+    const filename = `wllama-native-state-${++this.slotFileId}.nzs`;
+    const data =
+      state instanceof Uint8Array
+        ? state
+        : new Uint8Array(await state.arrayBuffer());
+    await this.proxy.slotFileWrite(filename, data);
+    try {
+      const result = await this.proxy.wllamaAction<GlueMsgNativeStateRes>(
+        'native_state',
+        { _name: 'nsta_req', action: 'put', id, filename }
+      );
+      if (!result.success) {
+        throw new WllamaError('Failed to put native state', 'inference_error');
+      }
+      return await this.getSingleResult(result.req_id, 'native state put');
+    } finally {
+      await this.proxy.slotFileRemove(filename);
+    }
+  }
+
+  /**
+   * Read a stored native state (one this engine produced, or one put or loaded), as the server's
+   * GET /v1/neuralese/native-states/:id does: its bytes exactly as stored, natlang's store-file format.
+   * @param id The state's ID
+   * @returns The state's bytes and its metadata ({id, ...metadata})
+   */
+  async getNativeState(
+    id: string
+  ): Promise<{ state: Uint8Array; meta: Record<string, unknown> }> {
+    this.checkModelLoaded();
+    const filename = `wllama-native-state-${++this.slotFileId}.nzs`;
+    const result = await this.proxy.wllamaAction<GlueMsgNativeStateRes>(
+      'native_state',
+      { _name: 'nsta_req', action: 'get', id, filename }
+    );
+    if (!result.success) {
+      throw new WllamaError('Failed to get native state', 'inference_error');
+    }
+    const state = await this.proxy.slotFileRead(filename);
+    return { state, meta: JSON.parse(result.meta_json) };
   }
 
   /**

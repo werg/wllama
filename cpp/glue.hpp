@@ -685,6 +685,27 @@ struct glue_msg_slots_res
 
 /////////
 
+// natlang native states (natlang's store-file format), moved through the in-memory FS as files under /slots:
+// "put" verifies the file's state, stores it as received and registers it (PUT /v1/neuralese/native-states/:id),
+// "get" writes a stored (e.g. produced) state's bytes to the file (GET /v1/neuralese/native-states/:id)
+struct glue_msg_native_state_req
+{
+  GLUE_HANDLER("nsta_req")
+  GLUE_FIELD(str, action)
+  GLUE_FIELD(str, id)
+  GLUE_FIELD(str, filename)
+};
+
+struct glue_msg_native_state_res
+{
+  GLUE_HANDLER("nsta_res")
+  GLUE_FIELD(bool, success)
+  GLUE_FIELD(int, req_id)
+  GLUE_FIELD(str, meta_json)
+};
+
+/////////
+
 struct glue_msg_apply_template_req
 {
   GLUE_HANDLER("tmpl_req")

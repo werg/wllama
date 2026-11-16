@@ -656,6 +656,50 @@ export const GLUE_MESSAGE_PROTOTYPES: { [name: string]: GlueMessageProto } = {
       }
     ]
   },
+  "nsta_req": {
+    "name": "nsta_req",
+    "structName": "glue_msg_native_state_req",
+    "className": "GlueMsgNativeStateReq",
+    "fields": [
+      {
+        "type": "str",
+        "name": "action",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "id",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "filename",
+        "isNullable": false
+      }
+    ]
+  },
+  "nsta_res": {
+    "name": "nsta_res",
+    "structName": "glue_msg_native_state_res",
+    "className": "GlueMsgNativeStateRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "req_id",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "meta_json",
+        "isNullable": false
+      }
+    ]
+  },
   "tmpl_req": {
     "name": "tmpl_req",
     "structName": "glue_msg_apply_template_req",
@@ -963,6 +1007,22 @@ export interface GlueMsgSlotsRes {
   req_id: number;
 }
 
+// struct glue_msg_native_state_req
+export interface GlueMsgNativeStateReq {
+  _name: "nsta_req";
+  action: string;
+  id: string;
+  filename: string;
+}
+
+// struct glue_msg_native_state_res
+export interface GlueMsgNativeStateRes {
+  _name: "nsta_res";
+  success: boolean;
+  req_id: number;
+  meta_json: string;
+}
+
 // struct glue_msg_apply_template_req
 export interface GlueMsgApplyTemplateReq {
   _name: "tmpl_req";
@@ -1017,4 +1077,4 @@ export interface GlueMsgTestBackendOpsRes {
 }
 
 
-export type GlueMsg = GlueMsgError | GlueMsgLoadReq | GlueMsgLoadRes | GlueMsgCompletionReq | GlueMsgCompletionRes | GlueMsgEmbeddingReq | GlueMsgEmbeddingRes | GlueMsgRerankReq | GlueMsgRerankRes | GlueMsgSystemoneReq | GlueMsgSystemoneRes | GlueMsgScoreReq | GlueMsgScoreRes | GlueMsgSlotsReq | GlueMsgSlotsRes | GlueMsgApplyTemplateReq | GlueMsgApplyTemplateRes | GlueMsgGetResultReq | GlueMsgGetResultRes | GlueMsgCancelReq | GlueMsgCancelRes | GlueMsgTestBackendOpsReq | GlueMsgTestBackendOpsRes;
+export type GlueMsg = GlueMsgError | GlueMsgLoadReq | GlueMsgLoadRes | GlueMsgCompletionReq | GlueMsgCompletionRes | GlueMsgEmbeddingReq | GlueMsgEmbeddingRes | GlueMsgRerankReq | GlueMsgRerankRes | GlueMsgSystemoneReq | GlueMsgSystemoneRes | GlueMsgScoreReq | GlueMsgScoreRes | GlueMsgSlotsReq | GlueMsgSlotsRes | GlueMsgNativeStateReq | GlueMsgNativeStateRes | GlueMsgApplyTemplateReq | GlueMsgApplyTemplateRes | GlueMsgGetResultReq | GlueMsgGetResultRes | GlueMsgCancelReq | GlueMsgCancelRes | GlueMsgTestBackendOpsReq | GlueMsgTestBackendOpsRes;
